@@ -54,6 +54,10 @@ class _DistributedOptimizer(torch.optim.Optimizer):
         self._handles = {}
         self._grad_accs = []
 
+        # Used for gradient aggregation
+        # Client is responsible for triggering this on/off
+        self._pushing_updates = True
+
         if size() > 1:
             self._register_hooks()
 
@@ -71,8 +75,11 @@ class _DistributedOptimizer(torch.optim.Optimizer):
             assert p not in self._handles
             assert not p.grad.requires_grad
             name = self._parameter_names.get(p)
-            handle = allreduce_async_(p.grad.data, average=True, name=name)
-            self._handles[p] = handle
+            if self._pushing_updates:
+                # Pushing updates must be true before calling backwards()
+                # for the last time before sending updates
+                handle = allreduce_async_(p.grad.data, average=False, name=name)
+                self._handles[p] = handle
         return hook
 
     def synchronize(self):
@@ -83,6 +90,12 @@ class _DistributedOptimizer(torch.optim.Optimizer):
     def step(self, closure=None):
         self.synchronize()
         return super(self.__class__, self).step(closure)
+
+    def signal_not_pushing_updates(self):
+        self._pushing_updates = False
+
+    def signal_pusing_updates(self):
+        self._pushing_updates = True
 
 
 def DistributedOptimizer(optimizer, named_parameters=None):

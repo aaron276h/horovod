@@ -26,6 +26,8 @@ parser.add_argument('--checkpoint-format', default='./checkpoint-{epoch}.pth.tar
 # Default settings from https://arxiv.org/abs/1706.02677.
 parser.add_argument('--batch-size', type=int, default=32,
                     help='input batch size for training')
+parser.add_argument('--update_frequency', type=int, default=1,
+                    help='how frequently (iterations) updates are applied')
 parser.add_argument('--val-batch-size', type=int, default=32,
                     help='input batch size for validation')
 parser.add_argument('--epochs', type=int, default=90,
@@ -116,6 +118,10 @@ if args.cuda:
     model.cuda()
 
 # Horovod: scale learning rate by the number of GPUs.
+# optimizer = optim.SGD(model.parameters(), lr=args.base_lr * hvd.size(),
+#                      momentum=args.momentum, weight_decay=args.wd)
+
+# Don't scale anymore because we are summing updates not averaging (not always true)
 optimizer = optim.SGD(model.parameters(), lr=args.base_lr * hvd.size(),
                       momentum=args.momentum, weight_decay=args.wd)
 
@@ -147,13 +153,41 @@ def train(epoch):
         for batch_idx, (data, target) in enumerate(train_loader):
             adjust_learning_rate(epoch, batch_idx)
 
+            """
+            Notes about gradient aggregation:
+
+                1) On the first iteration and following an iteration
+                where updates are pushed, zero the gradients and
+                signal horovod to not push updates.
+
+                2) If this is the last iteration before a push need
+                to signal horovod to push updates before calling
+                loss.backward(). This will also be the only time
+                we call optimizer.step().
+
+                3) If pushing every iteration then step 1 and 2 will
+                both occur every iteration.
+            """
+
+            clear_gradients = (batch_idx % args.update_frequency == 0)
+            push_updates = ((batch_idx+1) % args.update_frequency == 0)
+
+            if clear_gradients:
+                optimizer.zero_grad()
+                optimizer.signal_not_pushing_updates()
+
+            if push_updates:
+                optimizer.signal_pushing_updates()
+
             if args.cuda:
                 data, target = data.cuda(), target.cuda()
             optimizer.zero_grad()
             output = model(data)
             loss = F.cross_entropy(output, target)
             loss.backward()
-            optimizer.step()
+
+            if push_updates:
+                optimizer.step()
 
             train_loss.update(loss)
             train_accuracy.update(accuracy(output, target))
