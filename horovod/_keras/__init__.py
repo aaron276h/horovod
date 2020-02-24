@@ -36,7 +36,8 @@ def _make_allreduce_grads_fn(device_dense, device_sparse, compression):
 
 
 def create_distributed_optimizer(keras, optimizer, name, device_dense, device_sparse,
-                                 compression, sparse_as_dense, aggregation_frequency):
+                                 compression, sparse_as_dense, aggregation_frequency,
+                                 average_aggregated_gradients):
     class _DistributedOptimizer(keras.optimizers.Optimizer):
         _HAS_AGGREGATE_GRAD = True
 
@@ -52,6 +53,7 @@ def create_distributed_optimizer(keras, optimizer, name, device_dense, device_sp
                 aggregation_frequency,
                 _make_allreduce_grads_fn(device_dense, device_sparse, compression),
                 sparse_as_dense,
+                average_aggregated_gradients
             )
 
             super(self.__class__, self).__init__(**kwargs)
