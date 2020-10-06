@@ -338,7 +338,12 @@ if _LegacyOptimizer is not None:
             if _executing_eagerly():
                 return self._optimizer.apply_gradients(*args, **kwargs)
             else:
-                return self._agg_helper.apply_gradients(lambda: self._optimizer.apply_gradients(*args, **kwargs), *args, **kwargs)
+                return self._agg_helper.apply_gradients(
+                    lambda: self._optimizer.apply_gradients(*args, **kwargs),
+                    self,
+                    *args,
+                    **kwargs
+                )
 
         def get_slot(self, *args, **kwargs):
             """Calls this same method on the underlying optimizer."""

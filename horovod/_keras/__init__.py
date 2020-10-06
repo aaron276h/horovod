@@ -97,17 +97,19 @@ def create_distributed_optimizer(keras, optimizer, name, device_dense, device_sp
                 return self._agg_helper.compute_gradients(tuple(grads))
 
         def apply_gradients(self, *args, **kwargs):
+            result = self._agg_helper.apply_gradients(
+                lambda: super(self.__class__, self).apply_gradients(*args, **kwargs),
+                self,
+                *args,
+                **kwargs,
+            )
             if not self._aggregated_gradients:
                 raise Exception('`apply_gradients()` was called without a call to '
                                 '`get_gradients()`or `_aggregate_gradients` . If you\'re using '
                                 'TensorFlow 2.0 or 2.1, please specify '
                                 '`experimental_run_tf_function=False` in `compile()`.')
 
-            return self._agg_helper.apply_gradients(
-                lambda: super(self.__class__, self).apply_gradients(*args, **kwargs),
-                *args,
-                **kwargs,
-            )
+            return result
 
     # We dynamically create a new class that inherits from the optimizer that was passed in.
     # The goal is to override get_gradients() method with an allreduce implementation.
