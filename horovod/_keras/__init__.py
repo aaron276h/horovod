@@ -54,6 +54,13 @@ def create_distributed_optimizer(keras, optimizer, name, device_dense, device_sp
                         average_aggregated_gradients=average_aggregated_gradients,
                         optimizer_type=LocalGradientAggregationHelper._OPTIMIZER_TYPE_KERAS,
                     )
+                else:
+                    self._agg_helper = LocalGradientAggregationHelperEager(
+                        aggregation_frequency=aggregation_frequency,
+                        allreduce_func=self._allreduce_grads,
+                        sparse_as_dense=sparse_as_dense,
+                        average_aggregated_gradients=average_aggregated_gradients,
+                    )
 
             super(self.__class__, self).__init__(**kwargs)
 
