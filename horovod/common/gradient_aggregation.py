@@ -10,8 +10,12 @@ def get_not_none_from_list(tensor_list):
 
 
 class LocalGradientAggregationHelper:
+
+    _OPTIMIZER_TYPE_KERAS = "optimizer_type_keras"
+    _OPTIMIZER_TYPE_LEGACY = "optimizer_type_legacy"
+
     def __init__(self, aggregation_frequency, allreduce_func, sparse_as_dense,
-                 average_aggregated_gradients):
+                 average_aggregated_gradients, optimizer_type):
         self._allreduce_grads = allreduce_func
 
         # How often are parameters synchronized
@@ -31,6 +35,7 @@ class LocalGradientAggregationHelper:
         self.counter = None
 
         self._sparse_as_dense = sparse_as_dense
+        self.optimizer_type = optimizer_type
 
         # Contains the mapping of indexes of grad updates that are
         # not None to their index in gpu shadow vars which only
@@ -69,12 +74,14 @@ class LocalGradientAggregationHelper:
             assert len(self.gpu_shadow_vars) + self.num_none_grad_updates == len(grads)
 
         # We expect to get a `sess` when we need to manually do a `sess.run(...)`
-        # for the variables to be initialized.
-        if sess:
+        # for the variables to be initialized. This is the `tf.keras`
+        # optimizers.
+        if self.optimizer_type == self._OPTIMIZER_TYPE_KERAS:
+            session = tf.compat.v1.keras.backend.get_session(op_input_list=())
             vars_init_op = tf.compat.v1.variables_initializer(
                 [self.counter, *get_not_none_from_list(self.gpu_shadow_vars)]
             )
-            sess.run(vars_init_op)
+            session.run(vars_init_op)
 
     def _clear_grads(self):
         clear_ops_list = []
