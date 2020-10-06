@@ -1,4 +1,8 @@
+from distutils.version import LooseVersion
+
 import tensorflow as tf
+
+_PRE_TF_2_4_0 = LooseVersion(tf.__version__) < LooseVersion('2.4.0')
 
 
 class LocalGradientAggregationHelperEager:
@@ -34,9 +38,6 @@ class LocalGradientAggregationHelperEager:
 
     @tf.function
     def compute_gradients(self, grads):
-        if self.aggregation_frequency == 1:
-            return self._allreduce_helper(grads)
-
         resulting_grads = []
         for idx, grad in enumerate(grads):
             if isinstance(grad, tf.IndexedSlices):
@@ -101,5 +102,36 @@ class LocalGradientAggregationHelperEager:
         for idx in self.shadow_var.keys():
             self.shadow_var[idx].assign_add(-1 * self.shadow_var[idx])
 
-    def apply_gradients(self, apply_grads_closure, *args, **kwargs):
-        tf.cond(tf.equal(self.counter, 0), apply_grads_closure, tf.no_op)
+    def apply_gradients(self, apply_grads_closure, optimizer, *args, **kwargs):
+        def increment_optimizer_iteration():
+            if hasattr(optimizer, "_iterations") and optimizer._iterations is not None:
+                return optimizer._iterations.assign_add(1).op
+            return tf.no_op()
+
+        if _PRE_TF_2_4_0:
+            return tf.cond(
+                pred=tf.equal(self.counter, 0),
+                true_fn=apply_grads_closure,
+                false_fn=increment_optimizer_iteration,
+            )
+
+        # In TF 2.4+ `_aggregate_gradients()` is called from inside of `apply_gradients()`.
+        # We account for this by calling `_aggregate_gradients()` outside of `apply_gradients()`
+        # and setting `experimental_aggregate_gradients` to False which specifies
+        # `apply_gradients()` to not call `aggregate_gradients()`
+        updated_grad_and_vars = optimizer._aggregate_gradients(args[0])
+
+        def aggregation_step():
+            if len(args) > 1:
+                kwargs["name"] = args[1]
+            kwargs["experimental_aggregate_gradients"] = False
+            return super(optimizer.__class__, optimizer).apply_gradients(updated_grad_and_vars, **kwargs)
+
+        def non_aggregation_step():
+            return increment_optimizer_iteration()
+
+        return tf.cond(
+            pred=tf.equal(self.counter, 0),
+            true_fn=aggregation_step,
+            false_fn=non_aggregation_step,
+        )
